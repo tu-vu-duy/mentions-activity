@@ -1,0 +1,49 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+  <head>
+    <title></title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <link rel="stylesheet" type="text/css" href="css/jquery.mentions.activity.css" />
+    <script type="text/javascript" src="js/jquery-1.8.2.min.js"></script>
+    <script type="text/javascript" src="js/underscore.js"></script>
+    <script type="text/javascript" src="js/jquery.mentions-activity.js"></script>
+  </head>
+  <body>
+    
+    <form id="Nform" name="Nform" method="post" action="" enctype="application/x-www-form-urlencoded" target="">
+      <div>
+      <textarea name="data" id="data" style="border: 1px solid rgb(204, 196, 196); padding: 7px; display: block; font-size: 14px; line-height: 16px; font-family: monospace, Arial; width: 1155px; margin: auto; height: 62px; "></textarea>
+      </div>
+      <input name="save" value="save" type="hidden" id="save"/>
+      <input type="button" value="Share" id="ShareButton" name="ShareButton"/>
+    </form><br> View data (test width: "foo", "bar", "hallo", "world", "john", "marry", "demo"):
+    <div id="viewdata" style="width: 600px; border: 1px solid rgb(204, 196, 196); min-height: 100px; margin-top: 10px;"></div>
+    <script type="text/javascript">
+      $('textarea#data').mentionsActivity({
+        onDataRequest:function (mode, query, callback) {
+          var url = window.location.protocol + '//' + window.location.host + '/note/rest/mentions?q='+query;
+          $.getJSON(url, function(responseData) {
+            responseData = window.underscore.filter(responseData, function(item) { 
+              return item.name.toLowerCase().indexOf(query.toLowerCase()) > -1;
+            });
+            callback.call(this, responseData);
+          });
+        },
+        idAction : 'ShareButton',
+        elasticStyle : {
+          maxHeight : '38px',
+          minHeight : '24px'
+        }
+      });
+
+      $('#ShareButton').on('click', function() {
+        $("#viewdata").html(function(){
+           var dt = $("#data").val();
+           var o = $(this).html();
+            return  ((o && o.length > 0) ? (o +'<br>') : o) + dt;
+        });
+
+      })
+    </script>
+  </body>
+</html>
