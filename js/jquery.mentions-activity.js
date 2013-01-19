@@ -3,12 +3,12 @@
  * Version 1.0.
  * Written by: Vu Duy Tu
  *
- * Using underscore.js, jquery-1.7.2.js
+ * Using underscore.js
  *
  */
 
 (function($, _, undefined) {
-  // Keyword map
+  // Settings
   var KEY = {
     BACKSPACE : 8,
     TAB : 9,
@@ -18,21 +18,25 @@
     UP : 38,
     RIGHT : 39,
     DOWN : 40,
+    DELETE : 46,
     MENTION : 64,
     COMMA : 188,
     SPACE : 32,
     HOME : 36,
     END : 35
-  };
-// Default settings
+  }; // Keys "enum"
+
   var defaultSettings = {
     triggerChar : '@',
     onDataRequest : $.noop,
     minChars : 1,
     showAvatars : true,
+    firstShowAll : false,
+    selectFirst : true,
     elastic : true,
     elasticStyle : {},
     idAction : "",
+    actionLink : null,
     classes : {
       autoCompleteItemActive : "active"
     },
@@ -40,19 +44,30 @@
       hasUse : true,
       live : 30000 // MiniSeconds
     },
+    messages : {
+      helpSearch: 'Type to start searching for users.',
+      searching: 'Searching for ',
+      foundNoMatch : 'Found no matching users for '
+    },
     templates : {
-      wrapper : _.template('<div class="mentions-activity"></div>'),
+      wrapper : _.template('<div class="exo-mentions"></div>'),
       autocompleteList : _.template('<div class="autocomplete-menu"></div>'),
-      autocompleteListItem : _.template('<li data-ref-id="<%= id %>" data-ref-type="<%= type %>" data-display="<%= display %>"><%= content %></li>'),
+      autocompleteListItem : _.template('<li class="data" data-ref-id="<%= id %>" data-ref-type="<%= type %>" data-display="<%= display %>"><%= content %></li>'),
       autocompleteListItemAvatar : _.template('<img  src="<%= avatar %>" />'),
       autocompleteListItemIcon : _.template('<div class="icon <%= icon %>"></div>'),
-      mentionItemSyntax : _.template('<%=name%>(<%=id%>)'),
+      mentionItemSyntax : _.template('<%=id%>'),
       mentionItemHighlight : _.template('<strong><span><%= value %></span></strong>')
     }
   };
 
+  var regexpURL = /(https?:\/\/)?((www\.[\w+]+\.[\w+]+\.?(:\d+)?)|([\w+]+\.[\w+]+\.?(\w+)?(:\d+)?))(\/\S*)?/g;
+  // /^(ht|f)tps?:\/\/[a-z0-9-\.]+\.[a-z]{2,4}\/?([^\s<>\#%"\,\{\}\\|\\\^\[\]`]+)?$/
+  // /(ftp|http|https):\/\/(\w+:{0,1}\w*@)?(\S+)(:[0-9]+)?(\/|\/([\w#!:.?+=&%@!\-\/]))?/
+
   function log(v) {
-    window.console.log(v);
+    if(window.console && window.console.log) {
+      window.console.log(v);
+    }
   }
 
   function cacheMention() {
@@ -60,23 +75,68 @@
       id : '',
       val : '',
       mentions : [],
-      data : ''
+      data : '',
+      actionLink : {}
     };
     return mentionCache;
   }
 
-  
   var utils = {
+    htmlEncode : function(str) {
+      return _.escape(str);
+    },
     highlightTerm : function(value, term) {
       if (!term && !term.length) {
         return value;
       }
-      return value.replace(new RegExp("(?![^&;]+;)(?!<[^<>]*)(" + term + ")(?![^<>]*>)(?![^&;]+;)", "gi"), "<b>$1</b>");
+      return value.replace(new RegExp("(?![^&;]+;)(?!<[^<>]*)(" + term + ")(?![^<>]*>)(?![^&;]+;)", "gi"), "<strong>$1</strong>");
+    },
+    rtrim : function(string) {
+      return string.replace(/\s+$/, "");
+    },
+    replaceFirst : function(string, by){
+      while(string.indexOf(by) === 0) {
+        string = string.substring(1);
+      }
+      return string;
+    },
+    validateWWWURL : function(url) {
+      if (url.indexOf('www.') > 0) {
+        return /(https?:\/\/)?(www\.[\w+]+\.[\w+]+\.?(:\d+)?)/.test(url);
+      }
+      return true;
+    },
+    searchFirstURL : function(x) {
+      var result = String(x).match(regexpURL);
+      if (result && result.length > 0) {
+        for ( var i = 0; i < result.length; ++i) {
+          if (result[i].length > 0 && this.validateWWWURL(result[i])) {
+            return result[i].replace('<br>', '');
+          }
+        }
+      }
+      return "";
+    },
+    removeLastBr : function(val) {
+      if (val) {
+        var l = val.length;
+        if (l > 0) {
+          val = val.replace(/<br\/?>$/gi, '');
+          if (l > val.length) {
+            return utils.removeLastBr(val);
+          }
+        }
+        return val;
+      }
+      return '';
     },
     getSimpleValue : function(val) {
-      return val.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
-                .replace(/<span.*?>/gi, '').replace(/<\/span>/gi, '')
-                .replace(/<br.*?>/g, '').replace(/\n/g, '<br />');
+      if (val) {
+        val = val.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
+                 .replace(/<span.*?>/gi, '').replace(/<\/span>/gi, '');
+        return utils.removeLastBr(val);
+      }
+      return '';
     },
     getCursorIndexOfText : function(before, after) {
       var t = 0;
@@ -88,9 +148,7 @@
         }
       }
       if (t >= 0) {
-        if ($.trim(before.substr(t)).toLowerCase().indexOf('<span') === 0) {
-          return t;
-        }
+        return t;
       }
       return -1;
     },
@@ -101,7 +159,7 @@
       };
       for ( var i = 0; i < before.length; ++i) {
         if (before[i] != after[i]) {
-          info.from = i - 1;
+          info.from = (i > 1) ? (i - 1) : 0;
           break;
         }
       }
@@ -117,51 +175,68 @@
       }
       return info;
     },
-    escapeHtml : function(str) {
-      return _.escape(str);
-    },
     isIE : ($.browser.msie),
-    isFirefox : ($.browser.mozilla)
+    isFirefox : ($.browser.mozilla),
+    brVersion : $.browser.version
   };
 
-  var mentions_activity = function(settings) {
+  var eXoMentions = function(settings) {
 
-    var jqTarget, jqMainInput, jqAutocompleteList, jqItemAutoComplateActive;
+    var jElmTarget, elmInputBox, elmInputWrapper, elmAutocompleteList, elmWrapperBox, elmActiveAutoCompleteItem;
+    var valueBeforMention = '';
     var mentionsCollection = [];
     var autocompleteItemCollection = {};
     var inputBuffer = [];
     var currentDataQuery = '';
-
+    var cursor = '<div class="cursorText"></div>&nbsp;';
+    var isBlockMenu = false;
+    var isInput = false;
+    // action add link
+    var ActionLink = {
+      isRun : false,
+      actionLink : null,
+      hasNotLink : true,
+      linkSaved : ''
+    };
+    
     settings = $.extend(true, {}, defaultSettings, settings);
 
     KEY.MENTION = settings.triggerChar.charCodeAt(0);
 
-    function initInterfaceInput() {
+    ActionLink.isRun = (settings.actionLink && settings.actionLink.length > 0);
+    ActionLink.actionLink = settings.actionLink;
 
-      if (jqMainInput.attr('data-mentions') == 'true') {
+    function initTextarea() {
+
+      if (elmInputBox.attr('data-mentions') == 'true') {
         return;
       }
 
-      jqMainInput.wrapAll($(settings.templates.wrapper()));
+      elmInputWrapper = elmInputBox.parent();
+      elmWrapperBox = $(settings.templates.wrapper());
+      elmInputBox.wrapAll(elmWrapperBox);
+      elmWrapperBox = elmInputWrapper.find('> div');
 
-      jqMainInput.attr('data-mentions', 'true');
-      jqMainInput.on('keydown', onKeyDownInput);
-      jqMainInput.on('keypress', onKeyPressInput);
-      jqMainInput.on('input', onInputInput);
-      jqMainInput.on('click', onClickInput);
-      jqMainInput.on('paste', onPasteInput);
-      jqMainInput.on('blur', onBlurInput);
+      elmInputBox.attr('data-mentions', 'true');
+      elmInputBox.on('keydown', onInputBoxKeyDown);
+      elmInputBox.on('keypress', onInputBoxKeyPress);
+      elmInputBox.on('keyup', onInputBoxKeyUp);
+      //elmInputBox.on('input', onInputBoxInput);
+      elmInputBox.on('click', onInputBoxClick);
+      elmInputBox.on('paste', onInputBoxPaste);
+      elmInputBox.on('blur', onInputBoxBlur);
 
       if (settings.elastic) {
-        jqMainInput.elastic(settings);
+        elmInputBox.elastic(settings);
       }
 
     }
 
     function initAutocomplete() {
-      jqAutocompleteList = $(settings.templates.autocompleteList());
-      jqAutocompleteList.appendTo(jqMainInput.parent());
-      jqAutocompleteList.delegate('li', 'mousedown', onAutoCompleteItemClick);
+      elmAutocompleteList = $(settings.templates.autocompleteList());
+      elmAutocompleteList.appendTo(elmWrapperBox);
+      elmAutocompleteList.on('mousedown', 'li.data', onAutoCompleteItemClick);
+      elmAutocompleteList.on('mouseover', 'li.data', selectAutoCompleteItem);
     }
 
     function updateValues() {
@@ -172,7 +247,7 @@
         syntaxMessage = syntaxMessage.replace(mention.value, textSyntax);
       });
 
-      jqMainInput.data('messageText', syntaxMessage);
+      elmInputBox.data('messageText', syntaxMessage);
     }
 
     function resetBuffer() {
@@ -193,9 +268,17 @@
       var currentMessage = getInputBoxFullValue();
 
       // Using a regex to figure out positions
-      var regex = new RegExp("\\" + settings.triggerChar + currentDataQuery, "gi");
+      var strReg = settings.triggerChar + currentDataQuery;
+      if(currentMessage.indexOf(strReg) === 0) {
+        strReg = "\\"+strReg;
+      } else if(currentMessage.indexOf('>'+strReg) > 0) {
+        strReg = "\\>"+strReg;
+      } else {
+        strReg = "\\ "+strReg;
+      }
+      var regex = new RegExp(strReg, "gi");
       regex.exec(currentMessage);
-
+      
       var startCaretPosition = regex.lastIndex - currentDataQuery.length - 1;
       var currentCaretPosition = regex.lastIndex;
 
@@ -214,22 +297,29 @@
       // Mentions & syntax message
       var updatedMessageText = start + addItemMention(mention.value) + end;
 
-      jqMainInput.val(updatedMessageText);
+      elmInputBox.val(updatedMessageText);
 
       initClickMention();
-      setCaratPosition(jqMainInput);
+      setCaratPosition(elmInputBox);
 
     }
 
 
     function addItemMention(value) {
-      var val = '<span contenteditable="false">' + value + '<span class="icon"' + ((utils.isFirefox) ? 'contenteditable="true"' : '') + '>x</span></span>'
-          + '&nbsp;<div id="cursorText"></div>';
+      var val = '<span contenteditable="false">' + value + '<span class="icon"' + ((utils.isFirefox) ? 'contenteditable="true"' : '') + '>x</span></span>';
+      return insertCursorText(val, -1, false);
+    }
+
+    function insertCursorText(value, index, add) {
+      var cursor_ = ' ' + ((add && add === true) ? (settings.triggerChar + cursor) : cursor);
+      var val = (index == 0) ? ($.trim(cursor_) + value) :
+                 ((index < 0) ? (value + cursor_) : 
+                  ($.trim(value.substring(0, index)) + cursor_ + $.trim(value.substring(index, value.length))));
       return val;
     }
 
     function initClickMention() {
-      var sp = jqMainInput.find('> span');
+      var sp = elmInputBox.find('> span');
       if (sp.length > 0) {
         $.each(sp, function(index, item) {
           var sp = $(item).find('span');
@@ -239,11 +329,18 @@
           sp.on('click', function(e) {
             var t = $(this).data('indexMS').indexMS;
             mentionsCollection.splice(t, 1);
-            $(this).parent().remove();
+            var parent = $(this).parent();
+            elmInputBox.find('.cursorText').remove();
+            $('<div class="cursorText"></div>').insertAfter(parent);
+            var tx = document.createTextNode(settings.triggerChar);
+            $(tx).insertAfter(parent);
+            parent.remove();
             updateValues();
             saveCacheData();
             initClickMention();
             e.stopPropagation();
+            autoSetKeyCode(elmInputBox);
+            setCaratPosition(elmInputBox);
           });
           $(item).on('click', function() {
             var selection = getSelection();
@@ -255,7 +352,7 @@
 
                 selection.removeAllRanges();
                 selection.addRange(range);
-              } catch(err) {}
+              } catch (err) {}
             }
           });
         });
@@ -276,9 +373,9 @@
 
     function setCaratPosition(inputField) {
       if (inputField) {
-        var cursorText = inputField.find('#cursorText');
+        var cursorText = inputField.find('.cursorText');
         if (inputField.val().length != 0) {
-          
+
           var elm = inputField[0];
           var selection = getSelection();
           if (selection) {
@@ -287,14 +384,14 @@
               'height' : '14px'
             }).html('&nbsp;&nbsp;&nbsp;');
             cursorText.focus();
-            try{
+            try {
               var range = document.createRange();
               range.selectNode(cursorText[0]);
               range.selectNodeContents(cursorText[0]);
 
               selection.removeAllRanges();
               selection.addRange(range);
-            }catch(err) {
+            } catch (err) {
               inputField.focus();
             }
           }
@@ -306,11 +403,11 @@
     }
     
     function getInputBoxFullValue() {
-      return $.trim(jqMainInput.value());
+      return $.trim(elmInputBox.value());
     }
 
     function getInputBoxValue() {
-      return $.trim(jqMainInput.val());
+      return $.trim(elmInputBox.val());
     }
 
     function onAutoCompleteItemClick(e) {
@@ -321,159 +418,193 @@
       return false;
     }
 
-    function onPasteInput(e) {
-      var before = $.trim(jqMainInput.value());
-      jqMainInput.animate({
+    function onInputBoxPaste(e) {
+      var before = $.trim(elmInputBox.value());
+      elmInputBox.animate({
         'cursor' : 'wait'
-      }, 100, function() {
-        var after = $.trim(jqMainInput.value());
+      }, 50, function() {
+        var after = $.trim(elmInputBox.value());
         var info = utils.getIndexChange(before, after);
+        if(after.indexOf('<img src="data:image/') >= 0) {
+          elmInputBox.val(before.substring(0, info.from) + '<div class="cursorText"></div>' + before.substring(info.from));
+          setCaratPosition(elmInputBox);
+          return;
+        }
         var text = after.substr(info.from, info.to);
         var nt = text.replace(new RegExp("(<[a-z0-9].*?>)(.*)(</[a-z0-9].*?>)", "gi"), "$2");
         if (nt.length < text.length) {
-          after = after.substr(0, info.from) + $('<div/>').html(text).text() + after.substr(info.to) + ' <div id="cursorText"></div>';
-          jqMainInput.val(after);
-          setCaratPosition(jqMainInput);
+          after = after.substr(0, info.from) + $('<div/>').html(text).text() + ' ' + cursor + after.substr(info.to);
+          text = after;
+          elmInputBox.val(after);
+          setCaratPosition(elmInputBox);
         }
-        jqMainInput.css('cursor', 'text');
-        jqMainInput.parent().find('.placeholder').hide();
+        autoAddLink(text);
+        elmInputBox.css('cursor', 'text');
+        disabledPlaceholder();
       });
 
       // 
       return;
     }
 
-    function onClickInput(e) {
-      resetBuffer();
-    }
-
-    function onBlurInput(e) {
-      hideAutoComplete();
-      saveCacheData();
-      var plsd = $(this).parent().find('div.placeholder:first');
-      if (plsd.length > 0 && $.trim(jqMainInput.val()).length === 0) {
-        plsd.show();
+    function onInputBoxClick(e) {
+      if(elmAutocompleteList.find('li').length > 0) {
+        setCaratPosition(elmInputBox);
+        showDropdown();
+      } else {
+        resetBuffer();
       }
     }
 
-    function onInputInput(e) {
+    function onInputBoxBlur(e) {
+      hideAutoComplete(false);
+      if(elmAutocompleteList.find('li').length > 0) {
+        elmInputBox.find('.cursorText').remove();
+        var value = elmInputBox.value();
+        var typed = inputBuffer.join('');
+        var reBy = $.trim(typed);
+        currentDataQuery = reBy.replace(settings.triggerChar, '');
+        inputBuffer = reBy.split('');
+        if(value.indexOf(typed) > 0) {
+          typed = ' ' + typed;
+          reBy = ' ' + reBy;
+        }
+        value = value.replace(typed, reBy+'<div class="cursorText"></div>');
+        elmInputBox.val(value);
+      }
+      saveCacheData();
+      if (getInputBoxValue().length === 0) {
+        enabledPlaceholder();
+      }
+    }
+
+    function onInputBoxInput(e) {
+      if(isInput) return;
+      isInput = true;
       updateValues();
       updateMentionsCollection();
-      hideAutoComplete();
-
+      inputBuffer = utils.replaceFirst(inputBuffer.join(''), ' ').split('');
       var triggerCharIndex = _.lastIndexOf(inputBuffer, settings.triggerChar);
-      if (triggerCharIndex > -1) {
-        currentDataQuery = $.trim(inputBuffer.slice(triggerCharIndex + 1).join(''));
-
-        _.defer(_.bind(doSearch, this, currentDataQuery));
+      if (triggerCharIndex === 0) {
+        if (isBlockMenu === false) {
+          var after = elmInputBox.value();
+          var indexChanged = utils.getCursorIndexOfText(valueBeforMention, after);
+          if (indexChanged > 0) {
+            var val = after.substring(indexChanged - 1, indexChanged);
+            var isRun = (val === ' ') || (val === '') || (val === '&nbsp;') || (val === '>');
+            if (!isRun) {
+              return;
+            }
+          }
+        }
+        currentDataQuery = inputBuffer.slice(triggerCharIndex + 1).join('');
+        // fix bug firefox auto added <br> last text.
+        currentDataQuery = utils.removeLastBr(currentDataQuery);
+        inputBuffer = String(settings.triggerChar+currentDataQuery).split('');
+        doSearch(currentDataQuery);
+      } else {
+        hideAutoComplete();
       }
     }
 
-    function onKeyPressInput(e) {
-      if (e.keyCode !== KEY.BACKSPACE) {
-        var typedValue = String.fromCharCode(e.which || e.keyCode);
+    function onInputBoxKeyPress(e) {
+      var keyCode = (e.which || e.keyCode);
+      if (keyCode !== KEY.BACKSPACE && keyCode !== KEY.LEFT && keyCode !== KEY.RIGHT &&
+          keyCode !== KEY.DELETE && keyCode !== KEY.UP && keyCode !== KEY.DOWN) {
+        var typedValue = String.fromCharCode(keyCode);
+        if(keyCode === KEY.RETURN) {
+          inputBuffer = [];
+          typedValue = ' ';
+        }
         inputBuffer.push(typedValue);
-        // Hark IE
         if (utils.isIE) {
-          onInputInput(e);
+          //onInputBoxInput(e);
         }
       }
-      var plsd = $(this).parent().find('div.placeholder:first');
-      if (plsd.length > 0) {
-        plsd.hide();
-      }
+      disabledPlaceholder();
     }
 
-    function onKeyDownInput(e) {
+    function onInputBoxKeyDown(e) {
+      isInput = false;
       // Run without IE
       if (String.fromCharCode(e.which || e.keyCode) === settings.triggerChar) {
-        onInputInput(e);
+        //onInputBoxInput(e);
       }
 
-      if (e.keyCode == KEY.LEFT || e.keyCode == KEY.RIGHT || e.keyCode == KEY.HOME || e.keyCode == KEY.END) {
+      // 
+      valueBeforMention = elmInputBox.value();
+
+      // This also matches HOME/END on OSX which is CMD+LEFT, CMD+RIGHT
+      if (((e.keyCode == KEY.LEFT || e.keyCode == KEY.RIGHT) && isBlockMenu === false) 
+                                           || e.keyCode == KEY.HOME || e.keyCode == KEY.END) {
+        // Defer execution to ensure carat pos has changed after HOME/END keys
         _.defer(resetBuffer);
-        // Hack IE9.
-        if (utils.isIE && window.parseInt($.browser.version) == 9) {
+        
+        if (navigator.userAgent.indexOf("MSIE 9") > -1) {
           _.defer(updateValues);
         }
         return;
       }
-      
-      if (e.keyCode == KEY.SPACE) {
-        inputBuffer = [];
-      }
+
       if (e.keyCode == KEY.BACKSPACE) {
-        inputBuffer.splice((inputBuffer.length - 1), 1);
+        //inputBuffer.splice((inputBuffer.length - 1), 1);
         if (utils.isIE) {
-          if (inputBuffer.length > 1 || (inputBuffer.length == 1 && $.browser.version < 9)) {
-            onInputInput();
+          if (inputBuffer.length > 1 || (inputBuffer.length == 1 && utils.brVersion < 9)) {
+            onInputBoxInput();
           } else {
             hideAutoComplete();
           }
         }
-        var plsd = $(this).parent().find('div.placeholder:first');
-        if (plsd.length > 0 && $.trim(jqMainInput.val()).length === 1) {
-          plsd.show();
-        } else {
-          var before = jqMainInput.value();
-          jqMainInput.animate({
-            'cursor' : 'wait'
-          }, 100, function() {
-            var after = jqMainInput.value();
-            var delta = before.length - after.length;
-            var textSizeMention = 63;
-            if (delta > textSizeMention) {
-              var i = utils.getCursorIndexOfText(before, after);
-              if (i >= 0) {
-                after = after.substr(0, i) + ' @<div id="cursorText"></div>' + after.substr(i, after.length);
-                after = after.replace(/  @/g, ' @');
-                jqMainInput.val(after);
-                autoSetKeyCode(jqMainInput);
-                setCaratPosition(jqMainInput);
-              }
-            } else if (delta == 1 && after[after.length - 1] === '@') {
-              autoSetKeyCode(jqMainInput);
-            }
-            jqMainInput.css('cursor', 'text');
-          });
-        }
+        
         return;
       }
-      // Hark IE can not update to the data value after add mentions.
+      
       if (utils.isIE && mentionsCollection.length) {
         updateValues();
       }
       
-      if (!jqAutocompleteList.is(':visible')) {
+      if (!elmAutocompleteList.is(':visible')) {
         return true;
       }
       
       switch (e.keyCode) {
         case KEY.UP:
         case KEY.DOWN:
-          var jqCurrentItem = null;
+          if(elmAutocompleteList.find('li.msg').length > 0) return false;
+          var elmCurrentAutoCompleteItem = null;
           if (e.keyCode == KEY.DOWN) {
-            if (jqItemAutoComplateActive && jqItemAutoComplateActive.length) {
-              jqCurrentItem = jqItemAutoComplateActive.next();
+            if (elmActiveAutoCompleteItem && elmActiveAutoCompleteItem.length) {
+              elmCurrentAutoCompleteItem = elmActiveAutoCompleteItem.next();
+              if(elmCurrentAutoCompleteItem.length == 0) {
+                elmCurrentAutoCompleteItem = elmAutocompleteList.find('li:first');
+              }
             } else {
-              jqCurrentItem = jqAutocompleteList.find('li:first');
+              elmCurrentAutoCompleteItem = elmAutocompleteList.find('li').first();
             }
           } else {
-            jqCurrentItem = $(jqItemAutoComplateActive).prev();
+            elmCurrentAutoCompleteItem = $(elmActiveAutoCompleteItem).prev();
+            if(elmCurrentAutoCompleteItem.length == 0) {
+              elmCurrentAutoCompleteItem = elmAutocompleteList.find('li:last');
+            }
           }
           
-          if (jqCurrentItem.length) {
-            selectAutoCompleteItem(jqCurrentItem);
+          if (elmCurrentAutoCompleteItem.length) {
+            selectAutoCompleteElement(elmCurrentAutoCompleteItem);
           }
+          isInput = true;
           return false;
           
         case KEY.RETURN:
         case KEY.TAB:
-          if (jqItemAutoComplateActive && jqItemAutoComplateActive.length) {
-            jqItemAutoComplateActive.trigger('mousedown');
-            e.stopPropagation();
-            return false;
+          if (elmActiveAutoCompleteItem && elmActiveAutoCompleteItem.length) {
+            elmActiveAutoCompleteItem.trigger('mousedown');
+          } else {
+            var eN = $.Event("keydown", { keyCode : KEY.DOWN });
+            $(this).trigger(eN);
           }
+          e.stopPropagation();
+          isInput = true;
+          return false;
         default: {
           return true;
         }
@@ -481,101 +612,294 @@
       return true;
     }
 
-    function autoSetKeyCode(elm) {
-      try {
-        resetBuffer();
-        inputBuffer[0] = settings.triggerChar;
-        if(utils.isIE && $.browser.version < 9) {
-          onInputInput();
-        } else {
-          var e = jQuery.Event("keypress", {
-            keyCode : KEY.MENTION,
-            charCode : settings.triggerChar
-          });
-          var e1 = jQuery.Event("keydown", {
-            keyCode : KEY.MENTION,
-            charCode : settings.triggerChar
-          });
-          elm.triggerHandler(e);
-          elm.trigger(e1);
-        }
-      } catch(err) {}
+    function onInputBoxKeyUp(e) {
+
+      checkRemoveMoreOneText(e);
+
+      backspceBroswerFix(e);
+
+      onInputBoxInput();
+
+      checkAutoAddLink(e);
+
+      if(getInputBoxValue().length === 0) {
+        enabledPlaceholder();
+      } else {
+        disabledPlaceholder();
+      }
+      //
     }
 
-    function processDropdown(query, results) {
-      jqAutocompleteList.show();
+    function checkRemoveMoreOneText(e) {
+      var currentValue = elmInputBox.value();
+      var delta = valueBeforMention.length - currentValue.length;
+      var isBackKey = (e.keyCode === KEY.BACKSPACE || e.keyCode === KEY.DELETE);
+      var isReset = true;
 
-      if (!results.length) {
-        hideAutoComplete();
-        return;
+      if (delta > 1 && (isBlockMenu === true) || (isBlockMenu === false && delta == 1 && isBackKey)) {
+        triggerOninputMention(valueBeforMention, currentValue);
+        isReset = false;
+      } else if (isBackKey === true) {
+        var textSizeMention = 63;
+        if (delta > textSizeMention && !utils.isFirefox) {
+          var indexChanged = utils.getCursorIndexOfText(valueBeforMention, currentValue);
+          if (indexChanged >= 0 && 
+                    $.trim(valueBeforMention.substr(indexChanged)).toLowerCase().indexOf('<span') === 0) {
+            currentValue = insertCursorText(currentValue, indexChanged, true);
+            elmInputBox.val(currentValue);
+            autoSetKeyCode(elmInputBox);
+            setCaratPosition(elmInputBox);
+            isReset = false;
+          }
+        } else if(delta == 1) {
+          var buffer = inputBuffer.join('');
+          var index = getIndexBufferChange(valueBeforMention, currentValue, buffer);
+          index = (index <= 0) ? (inputBuffer.length - 1) : index;
+          inputBuffer.splice(index, 1);
+          isInput = false;
+        }
+
+      } else if (delta === -1) {
+
+        if (isBlockMenu) {
+          var buffer = inputBuffer.join('');
+          if (currentValue.indexOf(buffer) < 0) {
+            var index = getIndexBufferChange(valueBeforMention, currentValue, buffer);
+            if (index > 0 && index < buffer.length) {
+              var char_ = inputBuffer[inputBuffer.length - 1];
+              inputBuffer.splice(index, 0, char_);
+              inputBuffer.pop();
+              isInput = false;
+              isReset = false;
+            } else {
+              resetBuffer();
+            }
+          }
+        }
+
+      }
+      
+      if (e.keyCode === KEY.SPACE && 
+          ((isBlockMenu === false) || 
+              (isReset && (elmAutocompleteList.find('li.msg').length > 0 ||inputBuffer.join().indexOf('  ') >= 0)))) {
+        resetBuffer();
+      }
+    }
+    
+    function getIndexBufferChange(valueBeforMention, currentValue, buffer) {
+      var indexChanged = utils.getCursorIndexOfText(valueBeforMention, currentValue);
+      var index = valueBeforMention.indexOf(buffer.substring(0, buffer.length - 1));
+      return indexChanged - index;
+    }
+
+    function triggerOninputMention(before, after) {
+      var indexChanged = utils.getCursorIndexOfText(before, after);
+      var fVal = after.substring(0, indexChanged);
+      var lVal = after.substring(indexChanged, after.length);
+      if(lVal.length > 0) {
+        var t = lVal.indexOf(' ');
+        var k = lVal.indexOf('<br>');
+        t = (t > 0 && t < k) ? t : k;
+        t = (t < 0) ? lVal.length : t;
+        lVal = lVal.substring(0, t);
+        
+        fVal += $.trim(lVal);
       }
 
-      jqAutocompleteList.empty();
-      var jqListItemDropDown = $("<ul>").appendTo(jqAutocompleteList).hide();
-
-      $.each(results, function(index, item) {
-        var itemUid = _.uniqueId('mention_');
-
-        autocompleteItemCollection[itemUid] = _.extend({}, item, {
-          value : item.name
-        });
-
-        var newItem = $(settings.templates.autocompleteListItem({
-          'id' : utils.escapeHtml(item.id),
-          'display' : utils.escapeHtml(item.name),
-          'type' : utils.escapeHtml(item.type),
-          'content' : (utils.highlightTerm(utils.escapeHtml((item.name + ' (' + item.id.replace('@', '') + ')')), query))
-        })).attr('data-uid', itemUid);
-
-        if (index === 0) {
-          selectAutoCompleteItem(newItem);
+      var hasTrigger = hasTriggerChar(fVal);
+      if (hasTrigger != false) {
+        inputBuffer = hasTrigger;
+        isInput = false;
+        valueBeforMention = '';
+        onInputBoxInput();
+      } else {
+        resetBuffer();
+      }
+    }
+    
+    function hasTriggerChar(val) {
+      //
+      if (val && val.length > 0 && val.indexOf(settings.triggerChar) >= 0) {
+        val = val.substring(val.indexOf(settings.triggerChar));
+        if(val.indexOf(' ') < 0 && val.indexOf('&nbsp;') < 0 && val.indexOf('<') < 0) {
+          return val.split('');
         }
+      }
+      return false;
+    }
 
-        if (settings.showAvatars) {
-          var elmIcon;
-
-          if (item.avatar) {
-            elmIcon = $(settings.templates.autocompleteListItemAvatar({
-              avatar : item.avatar
-            }));
-          } else {
-            elmIcon = $(settings.templates.autocompleteListItemIcon({
-              icon : item.icon
-            }));
+    function backspceBroswerFix(e) {
+      var selection = getSelection();
+      if (utils.isFirefox) {
+        var node = selection.focusNode;
+        if (String(node.tagName).toLowerCase() === 'span' && node.className === 'icon') {
+          $(node).trigger('click');
+        }
+      } else if (utils.isIE) {
+        var cRange = selection.createRange();
+        // log(cRange.parentElement());
+        // cRange.pasteHTML('text');
+      }
+    }
+    
+    function checkAutoAddLink(e) {
+      var keyCode = (e.which || e.keyCode);
+      if (keyCode && keyCode === KEY.SPACE) {
+        var val = getInputBoxFullValue();
+        autoAddLink(val);
+      }
+    }
+    
+    function autoAddLink(val) {
+      if (ActionLink.isRun && ActionLink.hasNotLink) {
+        ActionLink.linkSaved = utils.searchFirstURL(val);
+        if (ActionLink.linkSaved && ActionLink.linkSaved.length > 0) {
+          var action = ActionLink.actionLink;
+          action = $((typeof action === 'string') ? ('#' + action) : action);
+          if (action.length > 0) {
+            var input = $('#InputLink');
+            if (input.length > 0) {
+              ActionLink.hasNotLink = false;
+              saveCacheData();
+              input.val(ActionLink.linkSaved);
+              action.trigger('click');
+            }
           }
-          elmIcon.prependTo(newItem);
         }
-        newItem = newItem.appendTo(jqListItemDropDown);
-      });
-
-      jqAutocompleteList.show();
-      jqListItemDropDown.show();
+      }
+    }
+    
+    function autoSetKeyCode(elm) {
+      disabledPlaceholder();
+      resetBuffer();
+      inputBuffer[0] = settings.triggerChar;
+      valueBeforMention = '';
+      //
+      isInput = false;
+      onInputBoxInput();
     }
 
-    function hideAutoComplete() {
-      jqItemAutoComplateActive = null;
-      jqAutocompleteList.empty().hide();
+    function hideAutoComplete(isClear) {
+      if(isClear || isClear == null || isClear == undefined) {
+        elmActiveAutoCompleteItem = null;
+        hideDropdown().empty();
+      } else {
+        hideDropdown();
+      }
     }
 
-    function selectAutoCompleteItem(jqItem) {
-      jqItem.addClass(settings.classes.autoCompleteItemActive);
-      jqItem.siblings().removeClass(settings.classes.autoCompleteItemActive);
-      jqItemAutoComplateActive = jqItem;
+    function selectAutoCompleteElement(elmItem) {
+      elmItem.addClass(settings.classes.autoCompleteItemActive);
+      elmItem.siblings().removeClass(settings.classes.autoCompleteItemActive);
+      elmActiveAutoCompleteItem = elmItem;
+    }
+
+    function selectAutoCompleteItem(e) {
+      var elmItem = $(this);
+      selectAutoCompleteElement(elmItem);
+      e.stopPropagation();
+    }
+
+    function addMessageMenu(parent, msg) {
+      $('<li class="msg"></li>')
+          .html('<em>'+msg+'</em>')
+          .appendTo(parent)
+          .on('click mousedown', function(e) {
+            e.stopPropagation();
+            e.preventDefault();
+          });
+    }
+
+    function showDropdown() {
+      isBlockMenu = true;
+      return elmAutocompleteList.show();
+    }
+
+    function hideDropdown() {
+      isBlockMenu = false;
+      return elmAutocompleteList.hide();
+    }
+
+    function populateDropdown(query, results) {
+      showDropdown();
+      elmAutocompleteList.empty();
+      var elmDropDownList = $("<ul>").appendTo(elmAutocompleteList).hide();
+      var isShow = true;
+      //
+      if(query === '' && !settings.firstShowAll) {
+        addMessageMenu(elmDropDownList, settings.messages.helpSearch);
+      }
+
+      //
+      if(query != '' && results === 'searching') {
+        addMessageMenu(elmDropDownList, (settings.messages.searching + ' <strong>' + query + '</strong>.'));
+      }
+
+      //
+      if ((results === null || results === undefined || results.length === 0) && query != '') {
+        if(inputBuffer[inputBuffer.length - 1] != ' ') {
+          addMessageMenu(elmDropDownList, (settings.messages.foundNoMatch + ' <strong>' + query + '</strong>.'));
+        } else {
+          resetBuffer();
+          hideDropdown();
+        }
+      }
+      
+      
+      if (results && results.length > 0 && results != 'searching' && (query != '' || settings.firstShowAll)) {
+        _.each(results, function(item, index) {
+          var itemUid = _.uniqueId('mention_');
+
+          autocompleteItemCollection[itemUid] = _.extend({}, item, {
+            value : item.name
+          });
+
+          var elmListItem = $(settings.templates.autocompleteListItem({
+            'id' : utils.htmlEncode(item.id),
+            'display' : utils.htmlEncode(item.name),
+            'type' : utils.htmlEncode(item.type),
+            'content' : (utils.highlightTerm(utils.htmlEncode(item.name), query) + ' (' + item.id.replace('@', '') + ')')
+          })).attr('data-uid', itemUid);
+
+          if (index === 0 && settings.selectFirst) {
+            selectAutoCompleteElement(elmListItem);
+          }
+
+          if (settings.showAvatars) {
+            var elmIcon;
+
+            if (item.avatar) {
+              elmIcon = $(settings.templates.autocompleteListItemAvatar({
+                avatar : item.avatar
+              }));
+            } else {
+              elmIcon = $(settings.templates.autocompleteListItemIcon({
+                icon : item.icon
+              }));
+            }
+            elmIcon.prependTo(elmListItem);
+          }
+          elmListItem = elmListItem.appendTo(elmDropDownList);
+        });
+      }
+      
+      elmDropDownList.show();
     }
 
     function resetInput() {
-      jqMainInput.val('');
+      elmInputBox.val('');
       mentionsCollection = [];
       updateValues();
     }
 
     function doSearch(query) {
-      if (query === '' || String(query) === 'undefined')  query = ' ';
-      if (query.length >= settings.minChars) {
-        if(settings.cacheResult.hasUse) {
+      if ((query === '' || String(query) === 'undefined') && !settings.firstShowAll) {
+        populateDropdown('', null);
+      } else if (query.length >= settings.minChars) {
+        if (settings.cacheResult.hasUse) {
           var data = getCaseSearch(query);
           if (data) {
-            processDropdown(query, data);
+            populateDropdown(query, data);
           } else {
             search(query);
           }
@@ -587,8 +911,9 @@
     }
 
     function search(query) {
+      populateDropdown(query, 'searching');
       settings.onDataRequest.call(this, 'search', query, function(responseData) {
-        processDropdown(query, responseData);
+        populateDropdown(query, responseData);
         saveCaseSearch(query, responseData);
       });
     }
@@ -596,21 +921,21 @@
     function saveCaseSearch(id, obj) {
       if(settings.cacheResult.hasUse) {
         id = 'result' + ((id === ' ') ? '_20' : id);
-        var data = jqMainInput.parent().data("CaseSearch");
+        var data = elmInputBox.parent().data("CaseSearch");
         if (String(data) === "undefined") data = {};
         data[id] = obj;
-        jqMainInput.parent().data("CaseSearch", data);
+        elmInputBox.parent().data("CaseSearch", data);
       }
     }
 
     function getCaseSearch(id) {
       id = 'result' + ((id === ' ') ? '_20' : id);
-      var data = jqMainInput.parent().data("CaseSearch");
+      var data = elmInputBox.parent().data("CaseSearch");
       return (String(data) === "undefined") ? data : data[id];
     }
 
     function clearCaseSearch() {
-      jqMainInput.parent().stop().animate({
+      elmInputBox.parent().stop().animate({
         'cursor' : 'none'
       }, settings.cacheResult.live, function() {
         $(this).data("CaseSearch", {});
@@ -618,9 +943,9 @@
     }
 
     function saveCacheData() {
-      var key = jqTarget.attr('id');
+      var key = jElmTarget.attr('id');
       if (key) {
-        var parentForm = jqTarget.parents('form:first').parent();
+        var parentForm = jElmTarget.parents('form:first').parent();
         if (parentForm.length > 0) {
           var dataCache = parentForm.data(key);
           if (dataCache == null) {
@@ -628,31 +953,33 @@
           }
           dataCache.mentions = mentionsCollection;
           dataCache.val = getInputBoxFullValue();
-          dataCache.data = mentionsCollection.length > 0 ? jqMainInput.data('messageText') : getInputBoxValue();
+          dataCache.data = mentionsCollection.length > 0 ? elmInputBox.data('messageText') : getInputBoxValue();
+          dataCache.actionLink = ActionLink;
           parentForm.data(key, dataCache);
         }
       }
     }
 
     function updateCacheData() {
-      var parentForm = jqTarget.parents('form:first').parent();
-      var key = jqTarget.attr('id');
+      var parentForm = jElmTarget.parents('form:first').parent();
+      var key = jElmTarget.attr('id');
       if (key) {
         var dataCache = parentForm.data(key);
         if (dataCache == null) {
           resetInput();
         } else {
           mentionsCollection = dataCache.mentions;
-          jqMainInput.val(dataCache.val);
-          jqMainInput.data('messageText', dataCache.data);
+          elmInputBox.val(dataCache.val);
+          elmInputBox.data('messageText', dataCache.data);
+          ActionLink = dataCache.actionLink;
           updateValues();
         }
       }
     }
 
     function clearCacheData() {
-      var parentForm = jqTarget.parents('form:first').parent();
-      var key = jqTarget.attr('id');
+      var parentForm = jElmTarget.parents('form:first').parent();
+      var key = jElmTarget.attr('id');
       if (key) {
         var dataCache = parentForm.data(key);
         if (dataCache != null) {
@@ -662,10 +989,11 @@
     }
 
     function getTemplate() {
-      return $('<div contenteditable="true" g_editable="true" class="ReplaceTextArea editable"></div>');
+      var editableType = ($.browser.webkit) ? 'plaintext-only' : 'true';
+      return $('<div contenteditable="' + editableType + '" g_editable="true" class="ReplaceTextArea editable"></div>');
     }
 
-    function initInput(id, target) {
+    function initDisplay(id, target) {
       var id_ = "Display" + id;
       var displayInput = target.find('#' + id_);
       if (displayInput.length === 0) {
@@ -687,66 +1015,104 @@
         }
       };
       displayInput.value = function() {
-        var val = $(this).html().replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/<br.*?>/g, '').replace(/\n/g, '<br />');
+        var val = $(this).html().replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
         return val;
       };
       return displayInput;
     }
-
+    
+    function enabledPlaceholder() {
+      var parent = elmInputBox.parent();
+      parent.find('div.placeholder:first').show();
+      
+      var isLinked = ($('#LinkTitle').length > 0);
+      var action = $('#' + settings.idAction);
+      if(isLinked === false && action.length > 0 && action.attr('disabled') === undefined) {
+        $('#' + settings.idAction).attr('disabled', 'disabled').removeAttr('onclick').addClass('DisableButton');
+      }
+    }
+    
+    function disabledPlaceholder() {
+      elmInputBox.parent().find('div.placeholder:first').hide();
+      var action = $('#' + settings.idAction);
+      if (action.length > 0 && action.attr('disabled') === 'disabled') {
+        action.removeAttr('disabled').removeClass('DisableButton');
+        action.attr('onclick', action.data('actionLink').action);        
+      }
+    }
     // Public methods
     return {
       init : function(domTarget) {
         window.jq = $;
-        jqTarget = $(domTarget);
-        jqTarget.css({
+        jElmTarget = $(domTarget);
+        jElmTarget.css({
           'visibility' : 'hidden',
           'display' : 'none'
         });
-
         //
-        jqTarget.val('');
+        jElmTarget.val('');
 
-        jqMainInput = initInput(jqTarget.attr('id'), jqTarget.parent());
+        elmInputBox = initDisplay(jElmTarget.attr('id'), jElmTarget.parent());
 
-        initInterfaceInput();
+        initTextarea();
         initAutocomplete();
         updateCacheData();
-
-        // add placeholder
-        if ($.trim(jqMainInput.val()).length == 0) {
-          var title = jqTarget.attr('title');
-          title = (title && title.length > 0 ) ? title : "Enter some text...";
-          var placeholder = $('<div class="placeholder">' + title + '</div>').attr('title', title);
-          placeholder.on('click', function() {
-            jqMainInput.focus();
-          });
-          placeholder.appendTo(jqMainInput.parent());
-        }
-
-        // action submit
-        if (settings.idAction && settings.idAction.length > 0) {
-          $('#' + settings.idAction).on('mousedown', function() {
-            var value = mentionsCollection.length ? jqMainInput.data('messageText') : getInputBoxValue();
-
-            value = value.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
-            jqTarget.val(value);
-            clearCacheData();
-            resetInput();
-          });
-        }
 
         // prefill mentions
         if (settings.prefillMention) {
           addMention(settings.prefillMention);
         }
+
+        // action submit
+        if (settings.idAction && settings.idAction.length > 0) {
+          var actionLink = $('#' + settings.idAction).on('mousedown', function() {
+            var value = mentionsCollection.length ? elmInputBox.data('messageText') : getInputBoxValue();
+            value = value.replace(/<br\/?>/gi, '\n').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
+            jElmTarget.val(value);
+            $(this).click();
+            clearCacheData();
+            resetInput();
+          });
+          actionLink.attr('disabled', 'disabled').addClass('DisableButton');
+          actionLink.data('actionLink', {action: actionLink.attr('onclick')});
+        }
+
+        // add placeholder
+        var title = jElmTarget.attr('title');
+        if ($.trim(title).length > 0) {
+          var placeholder = $('<div class="placeholder">' + title + '</div>').attr('title', title);
+          placeholder.on('click', function() {
+            elmInputBox.focus();
+          });
+          placeholder.appendTo(elmInputBox.parent());
+          if(getInputBoxValue().length > 0) {
+            disabledPlaceholder();
+          } else {
+            enabledPlaceholder();
+          }
+        }
       },
 
       val : function(callback) {
-        var value = mentionsCollection.length ? jqMainInput.data('messageText') : getInputBoxValue();
         if (!_.isFunction(callback)) {
-          return value;
+          return;
         }
+        var value = mentionsCollection.length ? elmInputBox.data('messageText') : getInputBoxValue();
         callback.call(this, value);
+      },
+
+      clearLink : function(callback) {
+        ActionLink.hasNotLink = true;
+        ActionLink.linkSaved = '';
+        saveCacheData();
+      },
+
+      showButton : function(callback) {
+        var action = $('#' + settings.idAction);
+        if (action.length > 0 && action.attr('disabled') === 'disabled') {
+          action.removeAttr('disabled').removeClass('DisableButton');
+          action.attr('onclick', action.data('actionLink').action);        
+        }
       },
 
       reset : function() {
@@ -755,7 +1121,7 @@
 
       getMentions : function(callback) {
         if (!_.isFunction(callback)) {
-          return ;
+          return;
         }
         callback.call(this, mentionsCollection);
       }
@@ -800,7 +1166,7 @@
     }
   });
 
-  $.fn.mentionsActivity = function(method, settings) {
+  $.fn.exoMentions = function(method, settings) {
 
     var outerArguments = arguments;
 
@@ -809,7 +1175,7 @@
     }
 
     return this.each(function() {
-      var instance = $.data(this, 'mentionsActivity') || $.data(this, 'mentionsActivity', new mentions_activity(settings));
+      var instance = $.data(this, 'exoMentions') || $.data(this, 'exoMentions', new eXoMentions(settings));
       if (_.isFunction(instance[method])) {
         return instance[method].apply(this, Array.prototype.slice.call(outerArguments, 1));
       } else if (typeof method === 'object' || !method) {
@@ -819,5 +1185,8 @@
       }
     });
   };
+})($, window.underscore);
+/*
+  fix: 1: paste link firefox has <br>
 
-})(jQuery, window.underscore);
+*/

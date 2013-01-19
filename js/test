@@ -1,0 +1,49 @@
+<link id="aaaa" rel="stylesheet" type="text/css" href="http://plf-4.0.0.alpha1-social-mentions-snapshot.acceptance2.exoplatform.org/social-portlet/skin/social/portlet/UIUserActivityStreamPortlet/DefaultStylesheet-lt.css">
+
+<script type="text/javascript" charset="utf-8"  src="http://svbuichu.com/javascript/mentions-activity/js/underscore.js"></script>
+<script type="text/javascript" charset="utf-8"  src="http://svbuichu.com/javascript/mentions-activity/js/jquery-1.8.2.min.js"></script>
+<script type="text/javascript" charset="utf-8"  src="http://svbuichu.com/javascript/mentions-activity/js/settings.js"></script>
+
+<div class="FAQViewerContainer" id="jquicomponent.id" style="border:solid 1px red; height: 500px; padding: 100px;">
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
+<br>
+<br>
+<br>
+<div>
+<textarea id="testmention" title="Type some text..."></textarea>
+</div>
+<br>
+<br>
+<br>
+<div id="ShareButtons" style="width:100px; height: 24px; border:solid 1px blue"> Click test</div>
+
+<div id="val"></div>
+ </div>
+
+
+
+<script>
+
+   jq('textarea#testmention').exoMentions2({
+        onDataRequest:function (mode, query, callback) {
+          var url = window.location.protocol + '//' + window.location.host + '/rest/social/people/getprofile/data.json?search='+query;
+          jq.getJSON(url, function(responseData) {
+            responseData = window.underscore.filter(responseData, function(item) { 
+              return item.name.toLowerCase().indexOf(query.toLowerCase()) > -1;
+            });
+            callback.call(this, responseData);
+          });
+        },
+        idAction : 'ShareButtons',
+        elasticStyle : {
+          maxHeight : '38px',
+          minHeight : '24px'
+        }
+      });
+jq('#ShareButtons').click(function() {
+    jq('#val').html(function() {
+return   jq(this).html() +'<br>'+ jq('#testmention').val();
+
+    })
+});
+</script>

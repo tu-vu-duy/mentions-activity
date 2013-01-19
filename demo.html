@@ -3,37 +3,64 @@
   <head>
     <title></title>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <link rel="stylesheet" type="text/css" href="css/form.css" />
     <link rel="stylesheet" type="text/css" href="css/jquery.mentions.activity.css" />
     <script type="text/javascript" src="js/jquery-1.8.2.min.js"></script>
     <script type="text/javascript" src="js/underscore.js"></script>
     <script type="text/javascript" src="js/jquery.mentions-activity.js"></script>
   </head>
   <body>
-    
-    <form id="Nform" name="Nform" method="post" action="" enctype="application/x-www-form-urlencoded" target="">
+    <div style="width: 600px; margin:auto; padding:20px">
+    <form id="Nform" name="Nform" method="post" action="" target="">
       <div>
-      <textarea name="data" id="data" style="border: 1px solid rgb(204, 196, 196); padding: 7px; display: block; font-size: 14px; line-height: 16px; font-family: monospace, Arial; width: 1155px; margin: auto; height: 62px; "></textarea>
+        <textarea name="data" id="data" title="Add some text for share...." style="border: 1px solid rgb(204, 196, 196); padding: 7px; display: block; font-size: 14px; line-height: 16px; font-family: monospace, Arial; width: 1155px; margin: auto; height: 62px; "></textarea>
+      </div>
+      <div>
+        Auto add link: <br>
+        <input id="InputLink" name="InputLink" style="width: 250px; height: 24px"/>
       </div>
       <input name="save" value="save" type="hidden" id="save"/>
+      <input type="button" value="Show Link" id="showLink" name="showLink"/>
       <input type="button" value="Share" id="ShareButton" name="ShareButton"/>
-    </form><br> View data (test width: "foo", "bar", "hallo", "world", "john", "marry", "demo"):
+    </form><br> View data (test with: <span id="testwith"></span>):
     <div id="viewdata" style="width: 600px; border: 1px solid rgb(204, 196, 196); min-height: 100px; margin-top: 10px;"></div>
+
     <script type="text/javascript">
-      $('textarea#data').mentionsActivity({
+      $('#InputLink').val('');
+      function newData(name_, lastName_) {
+        var fullName_ = String(name_[0]).toUpperCase() + name_.substring(1);
+        fullName_ += ' ' + lastName_;
+        var data = {
+          id: '@'+name_,
+          name: fullName_,
+          avatar: 'images/Avatar.gif',
+          type: 'contact'
+        };
+        return data;
+      }
+      var names_ = "test root demo mary john mark kenidy mattheu thomat crawford zayati benjamin peter rache fatma";
+      $('#testwith').html(names_);
+      var lastNames = "Nedonosko Paillereau Touzi Bradai Duke Aristote Bassy Joslin Ben Vacelet Lamarque Julien".split(' ');
+      var names = names_.split(' ');
+      var fakeData = [], lastL = lastNames.length;
+      for (var i = 0; i < names.length; ++i) {
+        var lastName = lastNames[Math.floor(Math.random()*lastL)];
+        fakeData[i] = newData(names[i], lastName);
+      }
+
+      $('textarea#data').exoMentions({
         onDataRequest:function (mode, query, callback) {
-          var url = window.location.protocol + '//' + window.location.host + '/note/rest/mentions?q='+query;
-          $.getJSON(url, function(responseData) {
-            responseData = window.underscore.filter(responseData, function(item) { 
+            var responseData = window.underscore.filter(fakeData, function(item) {
               return item.name.toLowerCase().indexOf(query.toLowerCase()) > -1;
             });
             callback.call(this, responseData);
-          });
         },
         idAction : 'ShareButton',
         elasticStyle : {
           maxHeight : '38px',
           minHeight : '24px'
-        }
+        },
+        actionLink : 'showLink'
       });
 
       $('#ShareButton').on('click', function() {
@@ -43,7 +70,13 @@
             return  ((o && o.length > 0) ? (o +'<br>') : o) + dt;
         });
 
-      })
+      });
+      $('#showLink').on('click', function() {
+         var l = $('#InputLink').val();
+         alert(l.length > 0 ? l : 'no link');
+      });
     </script>
+
+    </div>
   </body>
 </html>

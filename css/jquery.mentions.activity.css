@@ -1,14 +1,14 @@
 
-.mentions-activity {
+.exo-mentions {
   position: relative;
   background: #fff;
 }
 
-.mentions-activity textarea {
+.exo-mentions textarea {
   display: none;
 }
 
-.mentions-activity .autocomplete-menu {
+.exo-mentions .autocomplete-menu {
   display: none;
   background: #fff;
   border: 1px solid #b2b2b2;
@@ -27,12 +27,12 @@
           box-shadow: 0 2px 5px rgba(0, 0, 0, 0.148438);
 }
 
-.mentions-activity .autocomplete-menu ul {
+.exo-mentions .autocomplete-menu ul {
   margin: 0;
   padding: 0;
 }
 
-.mentions-activity .autocomplete-menu li {
+.exo-mentions .autocomplete-menu li {
   background-color: #fff;
   padding: 0 5px;
   margin: 0;
@@ -46,12 +46,12 @@
   white-space: nowrap;
 }
 
-.mentions-activity .autocomplete-menu li:last-child {
-  border-radius:5px;
+.exo-mentions .autocomplete-menu li:last-child {
+  border-radius:0px 0px 5px 5px;
 }
 
-.mentions-activity .autocomplete-menu li > img,
-.mentions-activity .autocomplete-menu .icon {
+.exo-mentions .autocomplete-menu li > img,
+.exo-mentions .autocomplete-menu .icon {
   width: 16px;
   height: 16px;
   float: left;
@@ -62,25 +62,29 @@
   border-radius:3px;
 }
 
-.mentions-activity .autocomplete-menu li em {
-  font-weight: bold;
+.exo-mentions .autocomplete-menu li em {
+  font-weight: normal;
   font-style: none;
 }
 
-.mentions-activity .autocomplete-menu li:hover,
-.mentions-activity .autocomplete-menu li.active {
+.exo-mentions .autocomplete-menu li.active {
   background-color: #649EED;
 }
 
-.mentions-activity .autocomplete-menu li b {
+.exo-mentions .autocomplete-menu li.msg {
+  background-color: #fff;
+	cursor: inherit;
+}
+
+.exo-mentions .autocomplete-menu li strong {
   font-weight: bold;
 }
 
-.mentions-activity .mentions {
+.exo-mentions .mentions {
   display: none;
 }
 
-.mentions-activity .ReplaceTextArea {
+.exo-mentions .ReplaceTextArea {
   margin:0;
   width:auto;
   height: 28px;
@@ -97,7 +101,7 @@
   border-radius: 5px;
 }
 
-.mentions-activity .ReplaceTextArea span {
+.exo-mentions .ReplaceTextArea span {
   background: #6495ED;
   border-radius: 3px;
   color: #036;
@@ -105,7 +109,7 @@
   display: inline-block;
 }
 
-.mentions-activity .ReplaceTextArea .icon {
+.exo-mentions .ReplaceTextArea .icon {
   background: url('../images/mention-remove.png') no-repeat center right;
   font-weight: bold;
   color: transparent;
@@ -118,7 +122,12 @@
 	font-size:10.5px;
 }
 
-.mentions-activity .placeholder {
+.exo-mentions .ReplaceTextArea .cursorText {
+  display: inline;
+  width: 0px;
+}
+
+.exo-mentions .placeholder {
   color: gray;
   opacity: 0.85;
   position: absolute;
